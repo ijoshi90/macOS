@@ -30,7 +30,7 @@ fi
 echo "Installing specified packages..."
 brew install python@3.12 aria2 dos2unix gh libunistring pypy3.10 tcl-tk wget \
     ca-certificates gdbm libidn2 ncurses readline tree xz dmg2img \
-    gettext libssh2 openssl@3 sqlite watch robot-framework
+    gettext libssh2 openssl@3 sqlite watch robot-framework libpst
 
 # 4. Install specified casks
 echo "Installing specified casks..."
