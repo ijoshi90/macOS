@@ -28,7 +28,7 @@ fi
 
 # 3. Install specified packages if not already installed
 echo "Installing specified packages..."
-packages=("python@3.12" "aria2" "dos2unix" "gh" "libunistring" "pypy3.10" "tcl-tk" "wget" \
+packages=("python@3.12" "pipx" "aria2" "dos2unix" "gh" "libunistring" "pypy3.10" "tcl-tk" "wget" \
     "ca-certificates" "gdbm" "libidn2" "ncurses" "readline" "tree" "xz" "dmg2img" \
     "gettext" "libssh2" "openssl@3" "sqlite" "watch" "robot-framework" "libpst")
 
