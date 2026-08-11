@@ -1,0 +1,28 @@
+{
+  "casks": [
+    { "id": "adobe-acrobat-reader",  "name": "Adobe Acrobat Reader",  "category": "Productivity",   "description": "PDF reader and editor" },
+    { "id": "calibre",               "name": "Calibre",               "category": "Productivity",   "description": "E-book management" },
+    { "id": "coteditor",             "name": "CotEditor",             "category": "Development",    "description": "Plain-text code editor" },
+    { "id": "github",                "name": "GitHub Desktop",        "category": "Development",    "description": "Git GUI client" },
+    { "id": "google-chrome",         "name": "Google Chrome",         "category": "Browser",        "description": "Web browser by Google" },
+    { "id": "google-gemini",         "name": "Google Gemini",         "category": "AI",             "description": "Google AI assistant" },
+    { "id": "macs-fan-control",      "name": "Macs Fan Control",      "category": "Utilities",      "description": "Fan speed monitor and control" },
+    { "id": "visual-studio-code",    "name": "Visual Studio Code",    "category": "Development",    "description": "Lightweight code editor by Microsoft" },
+    { "id": "vlc",                   "name": "VLC",                   "category": "Media",          "description": "Universal media player" },
+    { "id": "podman-desktop",        "name": "Podman Desktop",        "category": "Development",    "description": "Container management GUI" },
+    { "id": "utm",                   "name": "UTM",                   "category": "Utilities",      "description": "Virtual machine host for macOS" }
+  ],
+  "formulae": [
+    { "id": "python3",  "name": "Python 3",   "category": "Development", "description": "Latest Python 3 runtime" },
+    { "id": "vim",      "name": "Vim",         "category": "Development", "description": "Terminal text editor" },
+    { "id": "gh",       "name": "GitHub CLI",  "category": "Development", "description": "GitHub command-line tool" }
+  ],
+  "pip_packages": [
+    { "id": "playwright", "name": "Playwright", "category": "Testing", "description": "Browser automation for Python" }
+  ],
+  "settings": {
+    "enable_touchid_sudo": true,
+    "configure_pip_break_system_packages": true,
+    "install_playwright_browsers": true
+  }
+}
