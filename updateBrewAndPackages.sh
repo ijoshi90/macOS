@@ -1,5 +1,3 @@
-!/bin/bash
-
 password=$(security find-generic-password -a "$USER" -s "brew_sudo" -w)
 
 # Update Homebrew
@@ -20,3 +18,6 @@ fi
 # Install Python packages
 pip3 install influxdb-client --break-system-packages
 pip3 install pyyaml --break-system-packages
+
+brew cleanup
+brew cleanup --prune=all -s
