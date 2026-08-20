@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # macOS setup script — Homebrew + apps + TouchID sudo
 
+# On first invocation (any shell): re-exec under bash and pipe through tee for logging.
+# This means sh, zsh, fish, etc. all work — bash is invoked transparently.
+if [ -z "${_MACSETUP_RUN:-}" ]; then
+    _LOG="$HOME/macOS_setup_$(date +%Y%m%d_%H%M%S).log"
+    export _MACSETUP_RUN=1 _MACSETUP_LOG="$_LOG"
+    bash "$0" "$@" 2>&1 | tee -a "$_LOG"
+    exit $?
+fi
+
 set -uo pipefail
 
 # ─────────────────────────────────────────────────────────
@@ -13,6 +22,35 @@ info()    { printf '%b\n' "${BLUE}${BOLD}[INFO]${RESET}  $*"; }
 success() { printf '%b\n' "${GREEN}${BOLD}[OK]${RESET}    $*"; }
 warn()    { printf '%b\n' "${YELLOW}${BOLD}[WARN]${RESET}  $*"; }
 error()   { printf '%b\n' "${RED}${BOLD}[ERROR]${RESET} $*"; }
+
+# ─────────────────────────────────────────────────────────
+# ARGUMENT PARSING
+# ─────────────────────────────────────────────────────────
+DRY_RUN=false
+
+show_help() {
+    printf '%b\n' "${BOLD}Usage:${RESET} $(basename "$0") [OPTIONS]"
+    printf '\n'
+    printf '%b\n' "${BOLD}Options:${RESET}"
+    printf '  --dry-run    Print what would be installed without making any changes\n'
+    printf '  --help, -h   Show this help message\n'
+    printf '\n'
+    printf '%b\n' "${BOLD}What this script does:${RESET}"
+    printf '  1. Checks for Xcode Command Line Tools\n'
+    printf '  2. Enables TouchID for sudo\n'
+    printf '  3. Installs / updates Homebrew\n'
+    printf '  4. Installs GUI apps (casks)\n'
+    printf '  5. Installs CLI tools (formulae)\n'
+    printf '  6. Installs pip packages\n'
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=true ;;
+        --help|-h) show_help; exit 0 ;;
+        *) error "Unknown argument: $arg"; show_help; exit 1 ;;
+    esac
+done
 
 # ─────────────────────────────────────────────────────────
 # INSTALL TARGETS  (defined early so we can count them)
@@ -35,10 +73,18 @@ FORMULAE=(
     python3
     vim
     gh
+    git
+    wget
+    curl
 )
 
 TOTAL_STEPS=$(( ${#CASKS[@]} + ${#FORMULAE[@]} ))
 CURRENT_STEP=0
+
+# Failed install tracking
+FAILED_CASKS=()
+FAILED_FORMULAE=()
+FAILED_PIPS=()
 
 # ─────────────────────────────────────────────────────────
 # PROGRESS BAR
@@ -71,6 +117,15 @@ if [[ "$(uname)" != "Darwin" ]]; then
     exit 1
 fi
 
+# ─────────────────────────────────────────────────────────
+# MACOS VERSION CHECK (minimum: 12 Monterey)
+# ─────────────────────────────────────────────────────────
+MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+if [[ $MACOS_MAJOR -lt 12 ]]; then
+    error "macOS 12 (Monterey) or later is required. Found: $(sw_vers -productVersion)"
+    exit 1
+fi
+
 printf '\n'
 printf '%b\n' "${BOLD}╔══════════════════════════════════════════════════╗${RESET}"
 printf '%b\n' "${BOLD}║        macOS Setup — install_macOS_progs.sh      ║${RESET}"
@@ -78,7 +133,38 @@ printf '%b\n' "${BOLD}╚══════════════════�
 printf '\n'
 
 # ─────────────────────────────────────────────────────────
-# 1. ENABLE TOUCHID FOR SUDO
+# LOGGING
+# ─────────────────────────────────────────────────────────
+LOG_FILE="${_MACSETUP_LOG}"
+info "Logging session to $LOG_FILE"
+
+$DRY_RUN && warn "DRY RUN MODE — no changes will be made."
+
+echo ""
+
+# ─────────────────────────────────────────────────────────
+# 1. XCODE COMMAND LINE TOOLS
+# ─────────────────────────────────────────────────────────
+info "Checking for Xcode Command Line Tools..."
+
+if xcode-select -p &>/dev/null; then
+    success "Xcode Command Line Tools already installed at $(xcode-select -p)."
+else
+    if $DRY_RUN; then
+        info "[DRY RUN] Would trigger Xcode Command Line Tools installation."
+    else
+        info "Xcode Command Line Tools not found — triggering installer..."
+        xcode-select --install 2>/dev/null || true
+        warn "A system dialog has appeared to install Xcode Command Line Tools."
+        warn "Complete that installation, then re-run this script."
+        exit 1
+    fi
+fi
+
+echo ""
+
+# ─────────────────────────────────────────────────────────
+# 2. ENABLE TOUCHID FOR SUDO
 # ─────────────────────────────────────────────────────────
 info "Enabling TouchID for sudo operations..."
 
@@ -89,7 +175,9 @@ if grep -q "pam_tid.so" "$PAM_SUDO" 2>/dev/null; then
     success "TouchID for sudo is already enabled."
 else
     PAM_SUDO_LOCAL="/etc/pam.d/sudo_local"
-    if [[ -f "$PAM_SUDO_LOCAL" ]]; then
+    if $DRY_RUN; then
+        info "[DRY RUN] Would enable TouchID for sudo in $PAM_SUDO_LOCAL."
+    elif [[ -f "$PAM_SUDO_LOCAL" ]]; then
         if grep -q "pam_tid.so" "$PAM_SUDO_LOCAL" 2>/dev/null; then
             success "TouchID for sudo already enabled in sudo_local."
         else
@@ -117,46 +205,61 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────────────────
-# 2. INSTALL HOMEBREW
+# 3. INSTALL HOMEBREW
 # ─────────────────────────────────────────────────────────
 info "Checking for Homebrew..."
 
 if command -v brew &>/dev/null; then
     success "Homebrew already installed at $(brew --prefix)."
-    info "Updating Homebrew..."
-    brew update --quiet
-    success "Homebrew updated."
-else
-    info "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-    if [[ -x "/opt/homebrew/bin/brew" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-        PROFILE="$HOME/.zprofile"
-        if ! grep -q "homebrew/bin/brew shellenv" "$PROFILE" 2>/dev/null; then
-            echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$PROFILE"
-            info "Added brew to $PROFILE for future sessions."
-        fi
+    if $DRY_RUN; then
+        info "[DRY RUN] Would run: brew update && brew upgrade"
+    else
+        info "Updating Homebrew..."
+        brew update --quiet
+        success "Homebrew updated."
     fi
-    success "Homebrew installed."
+else
+    if $DRY_RUN; then
+        info "[DRY RUN] Would install Homebrew."
+    else
+        info "Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+        if [[ -x "/opt/homebrew/bin/brew" ]]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+            PROFILE="$HOME/.zprofile"
+            if ! grep -q "homebrew/bin/brew shellenv" "$PROFILE" 2>/dev/null; then
+                echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$PROFILE"
+                info "Added brew to $PROFILE for future sessions."
+            fi
+        fi
+        success "Homebrew installed."
+    fi
 fi
 
 echo ""
 
 # ─────────────────────────────────────────────────────────
-# 3. CASKS (GUI APPLICATIONS)
+# 4. CASKS (GUI APPLICATIONS)
 # ─────────────────────────────────────────────────────────
 info "Installing ${#CASKS[@]} GUI applications via brew install --cask ..."
 
 for cask in "${CASKS[@]}"; do
     print_progress "Installing cask: $cask"
-    if brew list --cask "$cask" &>/dev/null; then
-        success "$cask is already installed — skipping."
+    if $DRY_RUN; then
+        info "[DRY RUN] Would install cask: $cask"
+    elif brew list --cask "$cask" &>/dev/null; then
+        if [[ -n "$(brew outdated --cask --quiet "$cask" 2>/dev/null)" ]]; then
+            brew upgrade --cask "$cask" && success "$cask upgraded."
+        else
+            success "$cask already at latest version — skipping upgrade."
+        fi
     else
         if brew install --cask "$cask"; then
             success "$cask installed."
         else
             warn "$cask installation failed or was skipped. Check the output above."
+            FAILED_CASKS+=("$cask")
         fi
     fi
     (( CURRENT_STEP++ )) || true
@@ -165,19 +268,26 @@ done
 echo ""
 
 # ─────────────────────────────────────────────────────────
-# 4. FORMULAE (CLI TOOLS)
+# 5. FORMULAE (CLI TOOLS)
 # ─────────────────────────────────────────────────────────
 info "Installing ${#FORMULAE[@]} CLI tools via brew install ..."
 
 for formula in "${FORMULAE[@]}"; do
     print_progress "Installing formula: $formula"
-    if brew list "$formula" &>/dev/null; then
-        success "$formula is already installed — skipping."
+    if $DRY_RUN; then
+        info "[DRY RUN] Would install formula: $formula"
+    elif brew list "$formula" &>/dev/null; then
+        if [[ -n "$(brew outdated --quiet "$formula" 2>/dev/null)" ]]; then
+            brew upgrade "$formula" && success "$formula upgraded."
+        else
+            success "$formula already at latest version — skipping upgrade."
+        fi
     else
         if brew install "$formula"; then
             success "$formula installed."
         else
             warn "$formula installation failed. Check the output above."
+            FAILED_FORMULAE+=("$formula")
         fi
     fi
     (( CURRENT_STEP++ )) || true
@@ -187,7 +297,7 @@ done
 print_progress "All packages processed ✔"
 
 # ─────────────────────────────────────────────────────────
-# 5. PIP PACKAGES
+# 6. PIP PACKAGES
 # ─────────────────────────────────────────────────────────
 printf '\n'
 info "Installing pip packages with --break-system-packages ..."
@@ -195,52 +305,64 @@ info "Installing pip packages with --break-system-packages ..."
 PYTHON_BIN="$(brew --prefix)/bin/python3"
 PIP_BIN="$(brew --prefix)/bin/pip3"
 
-# Configure pip globally so it never prompts for pipx/venv
-PIP_CONF_DIR="$HOME/Library/Application Support/pip"
-PIP_CONF_FILE="$PIP_CONF_DIR/pip.conf"
-mkdir -p "$PIP_CONF_DIR"
-if grep -q "break-system-packages" "$PIP_CONF_FILE" 2>/dev/null; then
-    success "pip.conf already configured — no venv/pipx prompts."
-else
-    cat >> "$PIP_CONF_FILE" <<'EOF'
+if ! $DRY_RUN; then
+    # Configure pip globally so it never prompts for pipx/venv
+    PIP_CONF_DIR="$HOME/Library/Application Support/pip"
+    PIP_CONF_FILE="$PIP_CONF_DIR/pip.conf"
+    mkdir -p "$PIP_CONF_DIR"
+    if grep -q "break-system-packages" "$PIP_CONF_FILE" 2>/dev/null; then
+        success "pip.conf already configured — no venv/pipx prompts."
+    else
+        cat >> "$PIP_CONF_FILE" <<'EOF'
 [global]
 break-system-packages = true
 EOF
-    success "pip.conf updated — pip will never ask you to use pipx or a venv."
-fi
+        success "pip.conf updated — pip will never ask you to use pipx or a venv."
+    fi
 
-# Ensure pip is up to date
-"$PYTHON_BIN" -m pip install --upgrade pip --break-system-packages --quiet \
-    && success "pip upgraded." \
-    || warn "pip upgrade failed — continuing anyway."
+    # Ensure pip is up to date
+    "$PYTHON_BIN" -m pip install --upgrade pip --break-system-packages --quiet \
+        && success "pip upgraded." \
+        || warn "pip upgrade failed — continuing anyway."
+fi
 
 PIP_PACKAGES=(
     playwright
 )
 
 for pkg in "${PIP_PACKAGES[@]}"; do
-    if "$PIP_BIN" show "$pkg" &>/dev/null; then
-        success "$pkg is already installed — skipping."
+    if $DRY_RUN; then
+        info "[DRY RUN] Would install pip package: $pkg"
+    elif "$PIP_BIN" show "$pkg" &>/dev/null; then
+        if "$PIP_BIN" list --outdated 2>/dev/null | grep -q "^$pkg "; then
+            "$PIP_BIN" install --upgrade "$pkg" --break-system-packages \
+                && success "$pkg upgraded." || warn "$pkg upgrade failed."
+        else
+            success "$pkg already at latest version — skipping upgrade."
+        fi
     else
         info "Installing $pkg ..."
         if "$PIP_BIN" install "$pkg" --break-system-packages; then
             success "$pkg installed."
         else
             warn "$pkg installation failed. Check the output above."
+            FAILED_PIPS+=("$pkg")
         fi
     fi
 done
 
-# Install Playwright browsers (chromium, firefox, webkit)
-if command -v playwright &>/dev/null || "$PYTHON_BIN" -m playwright --version &>/dev/null 2>&1; then
-    info "Installing Playwright browsers..."
-    "$PYTHON_BIN" -m playwright install \
-        && success "Playwright browsers installed." \
-        || warn "Playwright browser install failed. Run: python3 -m playwright install"
+if ! $DRY_RUN; then
+    # Install Playwright browsers (chromium, firefox, webkit)
+    if command -v playwright &>/dev/null || "$PYTHON_BIN" -m playwright --version &>/dev/null 2>&1; then
+        info "Installing Playwright browsers..."
+        "$PYTHON_BIN" -m playwright install \
+            && success "Playwright browsers installed." \
+            || warn "Playwright browser install failed. Run: python3 -m playwright install"
+    fi
 fi
 
 # ─────────────────────────────────────────────────────────
-# 5. SUMMARY
+# 7. SUMMARY
 # ─────────────────────────────────────────────────────────
 printf '%b\n' "${BOLD}╔══════════════════════════════════════════════════╗${RESET}"
 printf '%b\n' "${BOLD}║                   Summary                        ║${RESET}"
@@ -257,30 +379,54 @@ fi
 printf '\n'
 printf '%b\n' "${BOLD}Installed applications:${RESET}"
 for cask in "${CASKS[@]}"; do
-    brew list --cask "$cask" &>/dev/null \
-        && printf '  %b\n' "${GREEN}✔${RESET}  $cask" \
-        || printf '  %b\n' "${RED}✘${RESET}  $cask  (check manually)"
+    if $DRY_RUN; then
+        printf '  %b\n' "${YELLOW}?${RESET}  $cask  (dry run)"
+    else
+        brew list --cask "$cask" &>/dev/null \
+            && printf '  %b\n' "${GREEN}✔${RESET}  $cask" \
+            || printf '  %b\n' "${RED}✘${RESET}  $cask  (check manually)"
+    fi
 done
 
 printf '\n'
 printf '%b\n' "${BOLD}Installed CLI tools:${RESET}"
 for formula in "${FORMULAE[@]}"; do
-    brew list "$formula" &>/dev/null \
-        && printf '  %b\n' "${GREEN}✔${RESET}  $formula  ($(brew list --versions "$formula"))" \
-        || printf '  %b\n' "${RED}✘${RESET}  $formula  (check manually)"
+    if $DRY_RUN; then
+        printf '  %b\n' "${YELLOW}?${RESET}  $formula  (dry run)"
+    else
+        brew list "$formula" &>/dev/null \
+            && printf '  %b\n' "${GREEN}✔${RESET}  $formula  ($(brew list --versions "$formula"))" \
+            || printf '  %b\n' "${RED}✘${RESET}  $formula  (check manually)"
+    fi
 done
 
-echo ""
-info "Python version: $(python3 --version 2>/dev/null || echo 'not found in PATH')"
-info "Vim version:    $(vim --version 2>/dev/null | head -1 || echo 'not found in PATH')"
+if ! $DRY_RUN; then
+    echo ""
+    info "Python version: $(python3 --version 2>/dev/null || echo 'not found in PATH')"
+    info "Vim version:    $(vim --version 2>/dev/null | head -1 || echo 'not found in PATH')"
+fi
 
 printf '\n'
 printf '%b\n' "${BOLD}Installed pip packages:${RESET}"
 for pkg in "${PIP_PACKAGES[@]}"; do
-    "$PIP_BIN" show "$pkg" &>/dev/null \
-        && printf '  %b\n' "${GREEN}✔${RESET}  $pkg  ($("$PIP_BIN" show "$pkg" 2>/dev/null | grep ^Version | awk '{print $2}'))" \
-        || printf '  %b\n' "${RED}✘${RESET}  $pkg  (check manually)"
+    if $DRY_RUN; then
+        printf '  %b\n' "${YELLOW}?${RESET}  $pkg  (dry run)"
+    else
+        "$PIP_BIN" show "$pkg" &>/dev/null \
+            && printf '  %b\n' "${GREEN}✔${RESET}  $pkg  ($("$PIP_BIN" show "$pkg" 2>/dev/null | grep ^Version | awk '{print $2}'))" \
+            || printf '  %b\n' "${RED}✘${RESET}  $pkg  (check manually)"
+    fi
 done
 
+# Failed installs summary
+if [[ ${#FAILED_CASKS[@]} -gt 0 || ${#FAILED_FORMULAE[@]} -gt 0 || ${#FAILED_PIPS[@]} -gt 0 ]]; then
+    printf '\n'
+    printf '%b\n' "${RED}${BOLD}Failed installations:${RESET}"
+    for c in "${FAILED_CASKS[@]}";    do printf '  %b\n' "${RED}✘${RESET}  cask: $c"; done
+    for f in "${FAILED_FORMULAE[@]}"; do printf '  %b\n' "${RED}✘${RESET}  formula: $f"; done
+    for p in "${FAILED_PIPS[@]}";     do printf '  %b\n' "${RED}✘${RESET}  pip: $p"; done
+fi
+
 echo ""
-success "Setup complete."
+$DRY_RUN && info "Dry run complete — no changes were made." || success "Setup complete."
+info "Log saved to $LOG_FILE"
