@@ -346,12 +346,14 @@ struct PackageEditSheet: View {
                 VStack(spacing: 12) {
                     fieldRow(label: "Brew ID", placeholder: "e.g. visual-studio-code",
                              text: $id, field: .id, mono: true)
-                    fieldRow(label: "Display Name", placeholder: "e.g. Visual Studio Code",
-                             text: $name, field: .name, mono: false)
-                    fieldRow(label: "Category", placeholder: "e.g. Development",
-                             text: $category, field: .category, mono: false)
-                    fieldRow(label: "Description", placeholder: "Short description",
-                             text: $description, field: .description, mono: false)
+                    if !isAdd {
+                        fieldRow(label: "Display Name", placeholder: "e.g. Visual Studio Code",
+                                 text: $name, field: .name, mono: false)
+                        fieldRow(label: "Category", placeholder: "e.g. Development",
+                                 text: $category, field: .category, mono: false)
+                        fieldRow(label: "Description", placeholder: "Short description",
+                                 text: $description, field: .description, mono: false)
+                    }
                 }
                 .padding(20)
             }

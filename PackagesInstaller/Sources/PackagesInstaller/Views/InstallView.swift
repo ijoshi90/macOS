@@ -161,6 +161,16 @@ struct InstallView: View {
                 .buttonStyle(.bordered)
             } else {
                 Button {
+                    vm.startUpdate()
+                } label: {
+                    Label("Update All", systemImage: "arrow.triangle.2.circlepath")
+                        .frame(minWidth: 110)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(vm.manifest == nil)
+
+                Button {
                     vm.startInstall()
                 } label: {
                     Label(vm.isDone ? "Run Again" : "Install All", systemImage: "play.fill")

@@ -58,24 +58,52 @@ done
 CASKS=(
     adobe-acrobat-reader
     calibre
+    caskhub
     coteditor
+    drawio
     github
+    github-copilot-app
     google-chrome
     google-gemini
+    lm-studio
     macs-fan-control
-    visual-studio-code
-    vlc
+    omnidisksweeper
     podman-desktop
     utm
+    visual-studio-code
+    vlc
+    zoom
 )
 
 FORMULAE=(
-    python3
-    vim
+    brotli
+    ca-certificates
+    curl
+    gettext
     gh
     git
+    json-c
+    libidn2
+    libnghttp2
+    libnghttp3
+    libngtcp2
+    libpsl
+    libsodium
+    libssh2
+    libunistring
+    lz4
+    mpdecimal
+    ncurses
+    openssl@3
+    openssl@4
+    pcre2
+    python@3.14
+    readline
+    sqlite
+    vim
     wget
-    curl
+    xz
+    zstd
 )
 
 TOTAL_STEPS=$(( ${#CASKS[@]} + ${#FORMULAE[@]} ))

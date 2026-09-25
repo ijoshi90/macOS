@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # BrewInstaller core script — called by the macOS GUI app
+# Usage: install_core.sh <packages.json> [install|update]
 # All output lines are prefixed with a tag the Swift app parses:
 #   INFO:   informational message
 #   OK:     success
@@ -11,6 +12,7 @@
 set -uo pipefail
 
 PACKAGES_JSON="${1:-$(dirname "$0")/../packages.json}"
+MODE="${2:-install}"
 
 log_info()     { printf 'INFO: %s\n'     "$*"; }
 log_ok()       { printf 'OK: %s\n'       "$*"; }
@@ -47,9 +49,9 @@ if [[ "$(uname)" != "Darwin" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────
-# 1. TOUCHID FOR SUDO
+# 1. TOUCHID FOR SUDO  (install mode only)
 # ─────────────────────────────────────────────────────────
-if [[ "$ENABLE_TOUCHID" == "true" ]]; then
+if [[ "$MODE" == "install" && "$ENABLE_TOUCHID" == "true" ]]; then
     log_info "Configuring TouchID for sudo..."
     PAM_SUDO="/etc/pam.d/sudo"
     TOUCHID_LINE="auth       sufficient     pam_tid.so"
@@ -83,67 +85,112 @@ fi
 # ─────────────────────────────────────────────────────────
 # 2. HOMEBREW
 # ─────────────────────────────────────────────────────────
-log_info "Checking Homebrew..."
+if [[ "$MODE" == "install" ]]; then
+    log_info "Checking Homebrew..."
 
-if command -v brew &>/dev/null; then
-    log_ok "Homebrew already installed at $(brew --prefix)."
-    log_info "Updating Homebrew..."
-    brew update --quiet && log_ok "Homebrew updated."
-else
-    log_info "Installing Homebrew (this may take a few minutes)..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
-        && log_ok "Homebrew installed." \
-        || { log_error "Homebrew installation failed."; exit 1; }
+    if command -v brew &>/dev/null; then
+        log_ok "Homebrew already installed at $(brew --prefix)."
+        log_info "Updating Homebrew..."
+        brew update --quiet && log_ok "Homebrew updated."
+    else
+        log_info "Installing Homebrew (this may take a few minutes)..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+            && log_ok "Homebrew installed." \
+            || { log_error "Homebrew installation failed."; exit 1; }
 
-    if [[ -x "/opt/homebrew/bin/brew" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-        PROFILE="$HOME/.zprofile"
-        if ! grep -q "homebrew/bin/brew shellenv" "$PROFILE" 2>/dev/null; then
-            echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$PROFILE"
-            log_info "Added brew to $PROFILE."
+        if [[ -x "/opt/homebrew/bin/brew" ]]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+            PROFILE="$HOME/.zprofile"
+            if ! grep -q "homebrew/bin/brew shellenv" "$PROFILE" 2>/dev/null; then
+                echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$PROFILE"
+                log_info "Added brew to $PROFILE."
+            fi
         fi
     fi
+else
+    if ! command -v brew &>/dev/null; then
+        log_error "Homebrew not found. Run Install first."
+        exit 1
+    fi
+    log_info "Refreshing Homebrew index..."
+    brew update --quiet && log_ok "Homebrew index refreshed."
 fi
 
 # ─────────────────────────────────────────────────────────
 # 3. CASKS
 # ─────────────────────────────────────────────────────────
-log_info "Installing ${#CASK_ARR[@]} cask(s)..."
-
-for cask in "${CASK_ARR[@]}"; do
-    log_progress "$CURRENT_STEP" "$TOTAL_STEPS" "$cask"
-    if brew list --cask "$cask" &>/dev/null; then
-        log_ok "$cask already installed — skipping."
-    else
-        log_info "Installing $cask..."
-        if brew install --cask "$cask" 2>&1 | while IFS= read -r line; do log_info "  $line"; done; then
-            log_ok "$cask installed."
+if [[ "$MODE" == "install" ]]; then
+    log_info "Installing ${#CASK_ARR[@]} cask(s)..."
+    for cask in "${CASK_ARR[@]}"; do
+        log_progress "$CURRENT_STEP" "$TOTAL_STEPS" "$cask"
+        if brew list --cask "$cask" &>/dev/null; then
+            log_ok "$cask already installed — skipping."
         else
-            log_warn "$cask installation failed or was skipped."
+            log_info "Installing $cask..."
+            if brew install --cask "$cask" 2>&1 | while IFS= read -r line; do log_info "  $line"; done; then
+                log_ok "$cask installed."
+            else
+                log_warn "$cask installation failed or was skipped."
+            fi
         fi
-    fi
-    (( CURRENT_STEP++ )) || true
-done
+        (( CURRENT_STEP++ )) || true
+    done
+else
+    log_info "Checking ${#CASK_ARR[@]} cask(s) for updates..."
+    OUTDATED_CASKS=$(brew outdated --cask --quiet 2>/dev/null)
+    for cask in "${CASK_ARR[@]}"; do
+        log_progress "$CURRENT_STEP" "$TOTAL_STEPS" "$cask"
+        if echo "$OUTDATED_CASKS" | grep -qx "$cask"; then
+            log_info "Updating $cask..."
+            if brew upgrade --cask "$cask" 2>&1 | while IFS= read -r line; do log_info "  $line"; done; then
+                log_ok "$cask updated."
+            else
+                log_warn "$cask update failed."
+            fi
+        else
+            log_ok "$cask already up-to-date — skipping."
+        fi
+        (( CURRENT_STEP++ )) || true
+    done
+fi
 
 # ─────────────────────────────────────────────────────────
 # 4. FORMULAE
 # ─────────────────────────────────────────────────────────
-log_info "Installing ${#FORM_ARR[@]} formula(e)..."
-
-for formula in "${FORM_ARR[@]}"; do
-    log_progress "$CURRENT_STEP" "$TOTAL_STEPS" "$formula"
-    if brew list "$formula" &>/dev/null; then
-        log_ok "$formula already installed — skipping."
-    else
-        log_info "Installing $formula..."
-        if brew install "$formula" 2>&1 | while IFS= read -r line; do log_info "  $line"; done; then
-            log_ok "$formula installed."
+if [[ "$MODE" == "install" ]]; then
+    log_info "Installing ${#FORM_ARR[@]} formula(e)..."
+    for formula in "${FORM_ARR[@]}"; do
+        log_progress "$CURRENT_STEP" "$TOTAL_STEPS" "$formula"
+        if brew list "$formula" &>/dev/null; then
+            log_ok "$formula already installed — skipping."
         else
-            log_warn "$formula installation failed."
+            log_info "Installing $formula..."
+            if brew install "$formula" 2>&1 | while IFS= read -r line; do log_info "  $line"; done; then
+                log_ok "$formula installed."
+            else
+                log_warn "$formula installation failed."
+            fi
         fi
-    fi
-    (( CURRENT_STEP++ )) || true
-done
+        (( CURRENT_STEP++ )) || true
+    done
+else
+    log_info "Checking ${#FORM_ARR[@]} formula(e) for updates..."
+    OUTDATED_FORMULAE=$(brew outdated --quiet 2>/dev/null)
+    for formula in "${FORM_ARR[@]}"; do
+        log_progress "$CURRENT_STEP" "$TOTAL_STEPS" "$formula"
+        if echo "$OUTDATED_FORMULAE" | grep -qx "$formula"; then
+            log_info "Updating $formula..."
+            if brew upgrade "$formula" 2>&1 | while IFS= read -r line; do log_info "  $line"; done; then
+                log_ok "$formula updated."
+            else
+                log_warn "$formula update failed."
+            fi
+        else
+            log_ok "$formula already up-to-date — skipping."
+        fi
+        (( CURRENT_STEP++ )) || true
+    done
+fi
 
 log_progress "$TOTAL_STEPS" "$TOTAL_STEPS" "All packages processed"
 
@@ -156,7 +203,7 @@ if [[ ${#PIP_ARR[@]} -gt 0 ]]; then
     PYTHON_BIN="$(brew --prefix)/bin/python3"
     PIP_BIN="$(brew --prefix)/bin/pip3"
 
-    if [[ "$CONF_PIP" == "true" ]]; then
+    if [[ "$MODE" == "install" && "$CONF_PIP" == "true" ]]; then
         PIP_CONF_DIR="$HOME/Library/Application Support/pip"
         PIP_CONF_FILE="$PIP_CONF_DIR/pip.conf"
         mkdir -p "$PIP_CONF_DIR"
@@ -172,18 +219,34 @@ if [[ ${#PIP_ARR[@]} -gt 0 ]]; then
         && log_ok "pip upgraded." \
         || log_warn "pip upgrade failed — continuing."
 
-    for pkg in "${PIP_ARR[@]}"; do
-        if "$PIP_BIN" show "$pkg" &>/dev/null; then
-            log_ok "$pkg already installed — skipping."
-        else
-            log_info "Installing pip package: $pkg..."
-            if "$PIP_BIN" install "$pkg" --break-system-packages --quiet; then
-                log_ok "$pkg installed."
+    if [[ "$MODE" == "install" ]]; then
+        for pkg in "${PIP_ARR[@]}"; do
+            if "$PIP_BIN" show "$pkg" &>/dev/null; then
+                log_ok "$pkg already installed — skipping."
             else
-                log_warn "$pkg installation failed."
+                log_info "Installing pip package: $pkg..."
+                if "$PIP_BIN" install "$pkg" --break-system-packages --quiet; then
+                    log_ok "$pkg installed."
+                else
+                    log_warn "$pkg installation failed."
+                fi
             fi
-        fi
-    done
+        done
+    else
+        OUTDATED_PIP=$("$PIP_BIN" list --outdated --format=columns 2>/dev/null | awk 'NR>2 {print tolower($1)}')
+        for pkg in "${PIP_ARR[@]}"; do
+            if echo "$OUTDATED_PIP" | grep -qx "${pkg,,}"; then
+                log_info "Updating pip package: $pkg..."
+                if "$PIP_BIN" install --upgrade "$pkg" --break-system-packages --quiet; then
+                    log_ok "$pkg updated."
+                else
+                    log_warn "$pkg update failed."
+                fi
+            else
+                log_ok "$pkg already up-to-date — skipping."
+            fi
+        done
+    fi
 
     if [[ "$INSTALL_PW" == "true" ]] && "$PYTHON_BIN" -m playwright --version &>/dev/null 2>&1; then
         log_info "Installing Playwright browsers..."

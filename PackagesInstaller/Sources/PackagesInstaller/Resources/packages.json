@@ -21,7 +21,7 @@
   "pip_packages": [
     { "id": "playwright", "name": "Playwright", "category": "Testing", "description": "Browser automation for Python" },
     { "id": "robotframework", "name": "Robotframework", "category": "Testing", "description": "Robot Framework" },
-    { "id": "robotframework-ride", "name": "Robotframework-ride", "category": "Testing", "description": "Robot Framework Ride Editor" },
+    { "id": "robotframework-ride", "name": "Robotframework-ride", "category": "Testing", "description": "Robot Framework Ride Editor" }
   ],
   "settings": {
     "enable_touchid_sudo": true,

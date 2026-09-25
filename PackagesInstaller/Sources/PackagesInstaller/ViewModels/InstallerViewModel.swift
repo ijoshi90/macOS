@@ -23,10 +23,21 @@ final class InstallerViewModel: ObservableObject {
     private var process: Process?
 
     init() {
-        // Bundle.module resolves correctly for any SPM target name
         let resourceURL = Bundle.module.resourceURL ?? Bundle.module.bundleURL
-        jsonURL   = resourceURL.appendingPathComponent("packages.json")
         scriptURL = resourceURL.appendingPathComponent("install_core.sh")
+
+        // Keep packages.json in Application Support so it persists across rebuilds
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appFolder  = appSupport.appendingPathComponent("PackagesInstaller")
+        let persistent = appFolder.appendingPathComponent("packages.json")
+
+        if !FileManager.default.fileExists(atPath: persistent.path) {
+            try? FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)
+            let bundled = resourceURL.appendingPathComponent("packages.json")
+            try? FileManager.default.copyItem(at: bundled, to: persistent)
+        }
+
+        jsonURL = persistent
 
         loadManifest()
         checkTouchID()
@@ -80,27 +91,30 @@ final class InstallerViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Install
+    // MARK: - Install / Update
 
-    func startInstall() {
+    func startInstall() { startRun(mode: "install") }
+    func startUpdate()  { startRun(mode: "update") }
+
+    private func startRun(mode: String) {
         guard !isRunning else { return }
         guard FileManager.default.fileExists(atPath: scriptURL.path) else {
             appendLog(.error, "install_core.sh not found at \(scriptURL.path)")
             return
         }
 
-        isRunning  = true
-        isDone     = false
-        progress   = 0
-        currentItem = "Starting…"
-        logEntries = []
+        isRunning   = true
+        isDone      = false
+        progress    = 0
+        currentItem = mode == "update" ? "Checking for updates…" : "Starting…"
+        logEntries  = []
         rebuildPackageStates()
 
         let total = Double(packageStates.filter { $0.kind != .pip }.count)
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["bash", scriptURL.path, jsonURL.path]
+        proc.arguments = ["bash", scriptURL.path, jsonURL.path, mode]
 
         let pipe = Pipe()
         proc.standardOutput = pipe
