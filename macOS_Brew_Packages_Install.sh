@@ -6,7 +6,15 @@
 if [ -z "${_MACSETUP_RUN:-}" ]; then
     _LOG="$HOME/macOS_setup_$(date +%Y%m%d_%H%M%S).log"
     export _MACSETUP_RUN=1 _MACSETUP_LOG="$_LOG"
-    bash "$0" "$@" 2>&1 | tee -a "$_LOG"
+    # Use `script` to allocate a pseudo-TTY so brew/curl keep their LIVE download
+    # progress (download size + %), while still capturing everything to $_LOG.
+    # Piping through `tee` (below) hides that progress because brew detects it is
+    # writing to a pipe rather than a terminal.
+    if command -v script >/dev/null 2>&1; then
+        script -q "$_LOG" bash "$0" "$@"
+    else
+        bash "$0" "$@" 2>&1 | tee -a "$_LOG"
+    fi
     exit $?
 fi
 
@@ -278,12 +286,12 @@ for cask in "${CASKS[@]}"; do
         info "[DRY RUN] Would install cask: $cask"
     elif brew list --cask "$cask" &>/dev/null; then
         if [[ -n "$(brew outdated --cask --quiet "$cask" 2>/dev/null)" ]]; then
-            brew upgrade --cask "$cask" && success "$cask upgraded."
+            brew upgrade --cask --verbose "$cask" && success "$cask upgraded."
         else
             success "$cask already at latest version — skipping upgrade."
         fi
     else
-        if brew install --cask "$cask"; then
+        if brew install --cask --verbose "$cask"; then
             success "$cask installed."
         else
             warn "$cask installation failed or was skipped. Check the output above."
@@ -306,12 +314,12 @@ for formula in "${FORMULAE[@]}"; do
         info "[DRY RUN] Would install formula: $formula"
     elif brew list "$formula" &>/dev/null; then
         if [[ -n "$(brew outdated --quiet "$formula" 2>/dev/null)" ]]; then
-            brew upgrade "$formula" && success "$formula upgraded."
+            brew upgrade --verbose "$formula" && success "$formula upgraded."
         else
             success "$formula already at latest version — skipping upgrade."
         fi
     else
-        if brew install "$formula"; then
+        if brew install --verbose "$formula"; then
             success "$formula installed."
         else
             warn "$formula installation failed. Check the output above."
